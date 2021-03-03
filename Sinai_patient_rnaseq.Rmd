@@ -1,0 +1,130 @@
+---
+title: "Plots for Sinai Patient RNA-seq"
+subtitle: "Testing response to perturbing IL10RB"
+author:
+- name: "[Gabriel Hoffman](http://gabrielhoffman.github.io)"
+  affiliation: | 
+    Icahn School of Medicine at Mount Sinai, New York
+date: "Run on `r Sys.time()`"
+documentclass: article
+output:
+  html_document:
+    toc: true
+    toc_float: true
+params:
+  upload: FALSE
+---
+
+
+<!---
+
+cd /Users/gabrielhoffman/workspace/repos/sars_cov_2_npc_response/
+# rm -rf analysis_cache/
+
+rmarkdown::render("Sinai_patient_rnaseq.Rmd")
+
+
+scp analysis.html sklar1:/hpc/users/hoffmg01/www/software/sars_cov_2_npc_response
+
+--->
+ 
+```{r setup}
+library(synapser)
+library(cowplot)
+library(data.table)
+library(ggplot2)
+synLogin()
+``` 
+
+```{r read.data}
+df_IL10RB = fread( synGet('syn25010953')$path )
+df_IL10RB$Gene = "IL10RB"
+
+df_IFNAR2 = fread( synGet('syn25010951')$path )
+df_IFNAR2$Gene = "IFNAR2"
+
+df = rbind(df_IL10RB, df_IFNAR2)
+df$se = with(df, logFC/t) 
+
+```{r make.plot}
+df2 = df[grep("Control", df$contrast),]
+
+lvls = c('SevereEODVsControl' = "Severe End-Organ Damage",
+         'SevereVsControl' = "Severe",
+        'ModerateVsControl' = "Moderate" )
+
+df2$show = lvls[as.character(df2$contrast)]
+df2$show = factor(df2$show, lvls)
+
+ggplot(df2, aes(Gene, logFC, color=show, label=format(adj.P.Val, digits=3))) + geom_point(  position=position_dodge(width=0.9)) + theme_classic() + theme(aspect.ratio=1, plot.title = element_text(hjust = 0.5)) + coord_flip() + geom_errorbar(aes(ymin=logFC - 1.96*se, ymax=logFC + 1.96*se), width=0.1, position=position_dodge(width=0.9)) + ggtitle("Differential expression compared to controls") + geom_hline(yintercept=0, linetype="dashed") + scale_color_manual(name = "Disease state", values = c("red", "darkred", "black")) + geom_text(aes(Gene, logFC), position=position_dodge(width=0.9))
+```
+
+
+
+<!---
+
+# 0 Control
+# 1 Moderate
+# 2 Severe
+# 3 Severe - EODV
+
+lvls = c(
+  'ModerateVsControl' = 1 -0, 
+  'SevereVsModerate'  = 2 -1, 
+  'SevereVsControl'   = 2 - 0,
+  'SevereEODVsSevere' = 3 - 2, 
+  'SevereEODVsControl' = 3 - 0, 
+  'SevereEODVsModerate' = 3-1)
+
+lvls = sort(lvls)
+
+df$contrast = factor(df$contrast, names(lvls))
+df$distance = lvls[df$contrast]
+
+ggplot(df, aes(Gene, logFC, color=contrast)) + geom_point(  position=position_dodge(width=0.9)) + theme_classic() + theme(aspect.ratio=1, plot.title = element_text(hjust = 0.5)) + coord_flip() + geom_errorbar(aes(ymin=logFC - 1.96*se, ymax=logFC + 1.96*se), width=0.1, position=position_dodge(width=0.9)) + ggtitle("Differential expression") + geom_hline(yintercept=0, linetype="dashed")
+
+
+
+
+
+
+
+
+df2 = df[grep("Control", df$contrast),]
+df2$Category = gsub("VsControl", '', as.character(df2$contrast))
+
+
+df2$Expr = with(df2, AveExpr + logFC)
+
+ggplot(df2, aes(Gene, logFC, color=Category)) + geom_point(  position=position_dodge(width=0.9)) + theme_classic() + theme(aspect.ratio=1, plot.title = element_text(hjust = 0.5)) + coord_flip() +  ggtitle("Differential expression") 
+
+
+
+
+
+# ggplot(df, aes(contrast, logFC, fill=Gene)) + geom_bar(stat="identity", position="dodge") + theme_classic() + theme(aspect.ratio=1, plot.title = element_text(hjust = 0.5)) + coord_flip() + geom_errorbar(aes(ymin=logFC - 1.96*se, ymax=logFC + 1.96*se), width=0.1, position=position_dodge(width=0.9)) + ggtitle("Differential expression")
+
+
+
+
+
+
+
+df_IL10RB$se = with(df_IL10RB, logFC/t) 
+ggplot(df_IL10RB, aes(contrast, logFC)) + geom_bar(stat="identity") + theme_classic() + theme(aspect.ratio=1, plot.title = element_text(hjust = 0.5)) + coord_flip() + geom_errorbar(aes(ymin=logFC - 1.96*se, ymax=logFC + 1.96*se), width=0.1) + ggtitle("IL10RB")
+
+
+
+--->
+
+
+
+
+
+
+
+
+
+
+
+
