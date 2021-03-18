@@ -24,6 +24,10 @@ cd /Users/gabrielhoffman/workspace/repos/sars_cov_2_npc_response/
 rmarkdown::render("analysis.Rmd")
 
 
+scp analysis.html sklar1:/hpc/users/hoffmg01/www/software/sars_cov_2_npc_response
+
+
+
 --->
  
 
@@ -74,6 +78,7 @@ library(EnrichmentBrowser)
 library(GSEABase)
 library(cowplot)
 library(kableExtra)
+library(tidyverse)
 library(githubr)
 library(zenith)
 library(knitr)
@@ -95,7 +100,7 @@ storeData = function( name, description){
   synStore(nEXP_OBJ)#, used = ALL_USED_IDs, executed = thisFile)
 }
 
-source("/Users/gabrielhoffman/workspace/repos/covarr-de/common_functions/common_functions.R")
+source("/Users/gabrielhoffman/workspace/repos/CMC/covarr-de/common_functions/common_functions.R")
 
 }) 
 knitr::opts_chunk$set(
@@ -282,7 +287,7 @@ ggplot(df_meta, aes(Gene, SARS.CoV.2, color=COVID)) + geom_point() + theme_class
 
 ggplot(df_meta, aes(RIN, SARS.CoV.2, color=COVID)) + geom_point() + theme_classic() + theme(aspect.ratio=1, plot.title = element_text(hjust = 0.5), legend.position="right") + geom_smooth(method='lm')
 
-ggplot(df_meta, aes(`SARS.CoV.2` , `SARS-CoV-2_ampl` / Primate_ampl, color=COVID)) + geom_point() + theme_classic() + theme(aspect.ratio=1, plot.title = element_text(hjust = 0.5)) + ggtitle("Complete versus AmpliSeq")
+ggplot(df_meta, aes(`SARS.CoV.2` , `SARS-CoV-2_ampl` / Primate_ampl, color=COVID, shape=Method)) + geom_point() + theme_classic() + theme(aspect.ratio=1, plot.title = element_text(hjust = 0.5)) + ggtitle("Complete versus AmpliSeq") #  + geom_smooth(method='lm', se=FALSE)
 
 R.all = with(df_meta, cor(`SARS.CoV.2` , `SARS-CoV-2_ampl` / Primate_ampl, method="spearman"))
 
@@ -330,19 +335,24 @@ ggplot(df[df$Method == "CRISPRa",], aes(Gene, Expression, color=COVID)) + geom_p
 
 
 # Initial variancePartition
-voom
+
 ```{r voom, fig.height=6, fig.width=6}
 design = model.matrix( ~ Gene + MDS1 + MDS2, info)
 vobj = voom(dge, design, plot=TRUE)
 ```
 
 variancePartition
+
 ```{r vp, eval=TRUE}
 vp = fitExtractVarPartModel( vobj, ~ (1|Method) + (1|Gene) + (1|COVID) + (1|Plate) + RIN + SARS.CoV.2 + MDS1 + MDS2, info, BPPARAM=SnowParam(4, progressbar=TRUE))
 
 plotVarPart( sortCols( vp ) ) + theme(aspect.ratio=1)
 ```
 
+## variancePartition for IL10RB expression
+```{r vp.IL10RB, fig.height=3}
+plotPercentBars(vp[geneInfo[Symbol=="IL10RB",Geneid],]) + theme(legend.position="right")
+```
 
 # Regress out MDS
 Removing the first two components reveals clear structure by gene
@@ -382,9 +392,44 @@ plot_grid( plotlist = figList, ncol=2)
 ```
 
 ```{r vp.mds, eval=FALSE}
-vp = fitExtractVarPartModel( vobj, ~ (1|Method) + (1|Gene) + (1|COVID) + (1|Plate) + RIN + SARS.CoV.2, info, BPPARAM=SnowParam(4, progressbar=TRUE))
+# vp = fitExtractVarPartModel( vobj, ~ (1|Method) + (1|Gene) + (1|COVID) + (1|Plate) + RIN + SARS.CoV.2, info, BPPARAM=SnowParam(4, progressbar=TRUE))
 
-plotVarPart( sortCols( vp ) ) + theme(aspect.ratio=1)
+# plotVarPart( sortCols( vp ) ) + theme(aspect.ratio=1)
+```
+
+# get residuals just for IL10RB
+```{r get.resids}
+
+ensGene = geneInfo[Symbol=="IL10RB",Geneid]
+
+df_IL10RB = data.frame(ID = colnames(resid), IL10RB = resid[ensGene,])
+rownames(df_IL10RB) = c()
+
+df = merge(df_IL10RB, info[,1:8], by='ID')
+
+ggplot(df, aes(Gene, IL10RB)) + geom_point()
+
+storeData( 'df_IL10RB', "Residualized expression of IL10RB (MDS1, MDS2, RIN)" )
+
+ensGene = geneInfo[Symbol == "IL10RB", Geneid]
+df_IL10RB = data.frame(ID = colnames(vobj), IL10RB = vobj$E[ensGene,])
+storeData( 'df_IL10RB', "Observed expression of IL10RB" )
+
+# IFNAR2
+ensGene = geneInfo[Symbol=="IFNAR2",Geneid]
+
+df_IFNAR2 = data.frame(ID = colnames(resid), IFNAR2 = resid[ensGene,])
+rownames(df_IFNAR2) = c()
+
+df = merge(df_IFNAR2, info[,1:8], by='ID')
+
+ggplot(df, aes(Gene, IFNAR2)) + geom_point()
+
+storeData( 'df_IFNAR2', "Residualized expression of IFNAR2 (MDS1, MDS2, RIN)" )
+
+ensGene = geneInfo[Symbol == "IFNAR2", Geneid]
+df_IFNAR2 = data.frame(ID = colnames(vobj), IFNAR2 = vobj$E[ensGene,])
+storeData( 'df_IFNAR2', "Observed expression of IFNAR2" )
 ```
 
 
@@ -486,7 +531,7 @@ run_analysis = function(vobj, infoSub, baseline, coefs, form, gsc){
       df_tstat= df_tstat)
 }
 
-gheatmap = function( df_melt, row, col, value, label=''){
+gheatmap = function( df_melt, row, col, value, label='', sort.row=TRUE, sort.col=TRUE, zlim=NULL, isSquare=TRUE){
 
   df_melt[[row]] = factor(df_melt[[row]], unique(df_melt[[row]]))
   df_melt[[col]] = factor(df_melt[[col]],  unique(df_melt[[col]]))
@@ -498,22 +543,38 @@ gheatmap = function( df_melt, row, col, value, label=''){
   # C = cor(t(df), method="spearman")
   # plotCorrMatrix(C)
 
-  d.row = as.dist(1-cor(t(df), method="spearman"))
-  hcl.row = hclust(d.row, method="ward.D2")
+  if( sort.col ){
+    d.row = as.dist(1-cor(t(df), method="spearman"))
+    hcl.row = hclust(d.row, method="ward.D2")
+  }else{
+    hcl.row = list(order = 1:nrow(df))
+  }
 
-  d.col = as.dist(1-cor(df, method="spearman"))
-  hcl.col = hclust(d.col, method="ward.D2")
+  if( sort.row ){
+    d.col = as.dist(1-cor(df, method="spearman"))
+    hcl.col = hclust(d.col, method="ward.D2")
+  }else{
+    hcl.col = list(order = 1:ncol(df))
+  }
 
   df_melt[[col]] = factor(df_melt[[col]], rownames(df)[hcl.row$order])
   df_melt[[row]] = factor(df_melt[[row]], colnames(df)[hcl.col$order])
 
+  if( is.null(zlim) ){
+    zlim = max(abs(df_melt$value)) 
+    zlim = c(-zlim, zlim)
+  }
   
-  zlim = max(abs(df_melt$value)) 
-  zlim = c(-zlim, zlim)
-  
-  aspect.ratio = length(unique(df_melt[[row]])) / length(unique(df_melt[[col]]))
+  fig =  ggplot(df_melt, aes_string(col, row, fill='value')) + geom_tile() + scale_fill_gradient2(name=label,low="blue", mid="white", high="red", limits=zlim) + theme_classic(8) + theme(plot.title = element_text(hjust = 0.5), axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))
 
-  ggplot(df_melt, aes_string(col, row, fill='value')) + geom_tile() + scale_fill_gradient2(name=label,low="blue", mid="white", high="red", limits=zlim) + theme_classic(8) + theme(aspect.ratio=aspect.ratio, plot.title = element_text(hjust = 0.5), axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))
+  if( isSquare ){
+    aspect.ratio = length(unique(df_melt[[row]])) / length(unique(df_melt[[col]]))
+    fig = fig + theme(aspect.ratio=aspect.ratio)
+  }
+
+  attr(fig, 'row.names') = levels(df_melt[[row]])
+  attr(fig, 'col.names') = levels(df_melt[[col]])
+  fig
 }
 ```
 
@@ -547,6 +608,8 @@ storeData( 'df_tstat', "t-statistics using scramble as baseline" )
 Differential expression performed with formula: `r paste(as.character(form), collapse=' ')`
 
 # Show effect of CRISPR on target genes
+Compare each IL10RB pertubation to the Scramble CRISPRa baseline, including `~ MDS1 + MDS2 + RIN` as covariates. `expression il10RB ~ variable [perturbation vs baseline] + MDS1 + MDS2 + RIN`.
+
 ```{r IL10RB.de}
 df_de = lapply(coefs.CRISPRa, function(coef){
   tab = topTable(res.CRISPRa$fit, coef=coef, number=Inf) %>% getGeneSymbol
@@ -584,13 +647,14 @@ plot_grid(plotlist=figList, ncol=2)
 
 
 ```{r other.de}
-df_de = lapply(coefs.shRNA[1:2], function(coef){
+df_de = lapply(coefs.shRNA, function(coef){
   tab = topTable(res.shRNA$fit, coef=coef, number=Inf) %>% getGeneSymbol
   data.frame(coef = gsub("Gene", '', coef), tab[tab$Symbol %in% c("IL10RB", 'IFNAR2'),c('Symbol','logFC', 't', 'P.Value')])
 })
 df_de = do.call(rbind, df_de)
 
 df_de[with(df_de, coef==Symbol),] %>% dplyr::select(c('coef', 'logFC', 't', 'P.Value')) %>% kable(caption="Effect of shRNA on the target gene", row.names=FALSE) %>% kable_styling(full_width=FALSE)
+df_de[with(df_de, coef=='COVIDCoV+'),] %>% dplyr::select(c('coef', 'logFC', 't', 'P.Value')) %>% kable(caption="Effect of SARS-CoV-2 infection", row.names=FALSE) %>% kable_styling(full_width=FALSE)
 ```
 
 
@@ -626,12 +690,102 @@ gs.any = unique(res[res$FDR < .01,]$Set)
 # gs.any = unique(res[res$FDR < .1,]$Set)
 
 resCombine = res[res$Set %in% gs.any,]
-resCombine$Coef = gsub("Gene", '', resCombine$Coef)
+resCombine$Coef = factor(gsub("Gene", '', resCombine$Coef))
 resCombine$value = with(resCombine, delta/se)
-gheatmap(resCombine, 'Set', 'Coef', label="t-statistic")
 storeData( 'resCombine', "Gene set analysis of differential expression" )
+resCombine$isGO = FALSE
+resCombine$isGO[grep("GO", resCombine$Set)] = TRUE
+
+# get similarity of gene sets based on jaccard index
+df = data.table(resCombine[resCombine$isGO,])
+df = df[,unique(data.table(Set, NGenes))]
+
+# get GO
+gs = get_GeneOntology()
+
+# get similarity of gene sets based on jaccard index
+M = pinnacle::getJaccardMatrix( gs[df$Set] )
+res = plotCorrMatrix(M)
+
+# sort genesets by clustering
+df$Set = factor(df$Set, colnames(M)[res$colInd])
+df = df[match(levels(Set), Set),]
+
+# Get max Jaccard for each geneset
+C = M
+diag(C) = NA
+df_max = data.frame(cormax = apply(C, 1, max, na.rm=TRUE))
+
+
+df_max = apply(C, 1, function(x){
+  i = which.max(x)
+  data.frame(ID = names(i), maxCor = x[i])
+  })
+df_max = do.call(rbind, df_max)
+
+df2 = merge(data.frame(df), df_max, by.x="Set", by.y="row.names")
+
+df2 %>% kable(caption="GO geneset info") %>% kable_styling(full_width=FALSE) 
 ```
 
+
+```{r geneset.plots}
+exclude = c("GO0034614: cellular response to reactive oxygen species",
+"GO0001525: angiogenesis",
+"GO0048514: blood vessel morphogenesis",
+"GO0001775: cell activation",
+"GO0001944: vasculature development",
+"GO0002263: cell activation involved in immune response",
+"GO0071345: cellular response to cytokine stimulus",
+"GO0032943: mononuclear cell proliferation",
+"GO0034097: response to cytokine",
+"GO0001775: cell activation",
+"GO0045765: regulation of angiogenesis",
+"GO0045766: positive regulation of angiogenesis",
+"GO0045321: leukocyte activation",
+"GO0046651: lymphocyte proliferation",
+"GO0070301: cellular response to hydrogen peroxide")
+
+newLvls = c(
+  'IL10RB-1' = "CRISPRa IL10RB-1",
+  'IL10RB-2' = "CRISPRa IL10RB-2",
+  'IL10RB-3' = "CRISPRa IL10RB-3",
+  'IL10RB-4' = "CRISPRa IL10RB-4",
+  'COVIDCoV+'= 'SARS-CoV-2 infection',
+  'IL10RB'   = "shRNA IL10RB",
+  'IFNAR2'   = "shRNA IFNAR2")
+
+# set zlim
+zlim = max(abs(resCombine$value))
+zlim = c(-zlim, zlim)
+
+figSigGO = resCombine %>% 
+  mutate(Coef = plyr::revalue(Coef, newLvls)) %>% 
+  mutate(Coef = factor(Coef, newLvls)) %>% 
+  dplyr::filter(isGO) %>% 
+  dplyr::filter(!Set %in% exclude) %>% 
+  gheatmap('Set', 'Coef', label="t-statistic", sort.col=FALSE, zlim=zlim)
+figSigGO
+```
+
+
+```{r geneset.plots2}
+figSigOther = resCombine %>% 
+  mutate(Coef = plyr::revalue(Coef, newLvls)) %>% 
+  mutate(Coef = factor(Coef, newLvls)) %>% 
+  dplyr::filter(!isGO) %>% 
+  gheatmap('Set', 'Coef', label="t-statistic", sort.col=FALSE, zlim=zlim)
+figSigOther
+```
+
+```{r cluster.signatures}
+# cluster these responses.
+df_tstat = merge(res.CRISPRa$df_tstat, res.shRNA$df_tstat, by="Geneid")
+
+C = cor(df_tstat[,-1])
+
+plotCorrMatrix(C)
+```
 
 
 
@@ -736,7 +890,7 @@ res = rbind(res.CRISPRa$enrich, res.shRNA$enrich)
 
 res$Coef = paste0(gsub("Gene", '', res$Coef), " (CoV-)")
 res$value = with(res, delta/se)
-res2 = rbind(res, resCombine)
+res2 = rbind(res, resCombine[,colnames(resCombine)!="isGO"])
 
 gs.any = unique(res2[res2$FDR < .01,]$Set)
 
@@ -756,8 +910,52 @@ resCombine2$value = with(resCombine2, delta/se)
 gheatmap(resCombine2, 'Set', 'Coef', label="t-statistic")
 ```
 
+```{r zenith.covNEg}
+
+resCombine.covneg = rbind(res.CRISPRa$enrich, res.shRNA$enrich)
+resCombine.covneg$Coef = factor(gsub("Gene", '', resCombine.covneg$Coef))
+resCombine.covneg$value = with(resCombine.covneg, delta/se)
+# storeData( 'resCombine', "Gene set analysis of differential expression" )
+resCombine.covneg$isGO = FALSE
+resCombine.covneg$isGO[grep("GO", resCombine.covneg$Set)] = TRUE
 
 
+res = resCombine.covneg[resCombine.covneg$Set %in% attr(figSigGO, "row.names"),]
+res$Set = factor( res$Set, attr(figSigGO, "row.names"))
+
+# order based on previous figure
+res = res[order(as.numeric(res$Set)),]
+
+res %>% 
+  mutate(Coef = plyr::revalue(Coef, newLvls)) %>% 
+  mutate(Coef = factor(Coef, newLvls)) %>% 
+  dplyr::filter(isGO) %>% 
+  dplyr::filter(!Set %in% exclude) %>% 
+  gheatmap('Set', 'Coef', label="t-statistic", sort.col=FALSE, 
+    sort.row=FALSE, zlim=zlim)
+```
+
+
+```{r zenith.covNEg.not.go}
+res = resCombine.covneg[resCombine.covneg$Set %in% attr(figSigOther, "row.names"),]
+res$Set = factor( res$Set, attr(figSigOther, "row.names"))
+
+# order based on previous figure
+res = res[order(as.numeric(res$Set)),]
+
+res %>% 
+  mutate(Coef = plyr::revalue(Coef, newLvls)) %>% 
+  mutate(Coef = factor(Coef, newLvls)) %>% 
+  dplyr::filter(!isGO) %>% 
+  gheatmap('Set', 'Coef', label="t-statistic", sort.col=FALSE, 
+    sort.row=FALSE, zlim=zlim)
+```
+
+```{r exit1, cache=FALSE}
+# rmarkdown::render("analysis.Rmd")
+
+ knitr::knit_exit()
+```
 
 
 
@@ -797,25 +995,34 @@ gheatmap(resCombine, 'Set', 'Coef', label="t-statistic")
 
 
 # Differential expression with SARS.CoV.2
+While IL10RB expression appears to be correlated with SARS.CoV.2 level, this association goes away 
+
+## Using covariates
 ```{r test.SARS.CoV.2}
-keep.samples = with(info, COVID=='CoV+') #  Method == "CRISPRa" &
+keep.samples = with(info, COVID=='CoV+')# & Method == "CRISPRa")
 keep <- filterByExpr(geneCounts[,keep.samples])
 dge = DGEList( geneCounts[keep,keep.samples])
 dge = calcNormFactors(dge)
 
 infoSub = droplevels(info[keep.samples,])
 
-design = model.matrix( ~ Gene + SARS.CoV.2 + MDS1 + MDS2, infoSub)
+form = ~ SARS.CoV.2 + MDS1 + MDS2 + RIN 
+design = model.matrix(form, infoSub)
 vobj = voom(dge, design, plot=FALSE)
 
 baseline = 'Scramble CRISPRa'
 coefs.CRISPRa = 'SARS.CoV.2'
-res = run_analysis( vobj, infoSub, baseline, coefs.CRISPRa, ~ Gene + MDS1 + MDS2 + SARS.CoV.2, gsc.test)
+res = run_analysis( vobj, infoSub, baseline, coefs.CRISPRa,  form, gsc.test)
 
 tab = topTable(res$fit, coef=coefs.CRISPRa, number=Inf)
 
 plotVolcano( tab ) + ggtitle('SARS.CoV.2 quantification')
 ```
+
+head(res$enrich)
+
+
+Using formula: `r paste0(as.character(form), collapse=' ')`
 
 Number of DE genes: `r sum(tab$adj.P.Val < 0.05)`
 
@@ -824,7 +1031,57 @@ IL10RB expression is not associated with viral load
 tab = topTable(res$fit, coef='SARS.CoV.2', number=Inf)
 
 tab = tab %>% getGeneSymbol 
+tab %>% filter(Symbol %in% c("IL10RB", 'IFNAR2')) %>% 
+  kable(caption="Test IL10RB, IFNAR2 versus viral load") %>% 
+  kable_styling(full_width=FALSE)
+```
+
+```{r IL10RB_SARS}
+ensGene = tab %>% filter(Symbol == "IL10RB") %>% rownames
+
+df = merge(infoSub, data.frame(ID = colnames(vobj), IL10RB.expression =  t(t(vobj$E[ensGene,]))), by="ID")
+df$resid = residuals(lm(IL10RB.expression ~ MDS1 + MDS2 + RIN, df))
+
+ggplot(df, aes(resid, SARS.CoV.2)) + geom_point() + geom_smooth(method='lm') + theme_classic() + theme(aspect.ratio=1)
+
+with(df, cor.test(resid, SARS.CoV.2))
+```
+
+## no covariates
+```{r test.SARS.CoV.2.no_Cov}
+form = ~ SARS.CoV.2
+design = model.matrix(form, infoSub)
+vobj = voom(dge, design, plot=FALSE)
+
+baseline = 'Scramble CRISPRa'
+coefs.CRISPRa = 'SARS.CoV.2'
+res = run_analysis( vobj, infoSub, baseline, coefs.CRISPRa,  form, gsc.test)
+
+tab = topTable(res$fit, coef=coefs.CRISPRa, number=Inf)
+
+plotVolcano( tab ) + ggtitle('SARS.CoV.2 quantification')
+```
+
+Using formula: `r paste0(as.character(form), collapse=' ')`
+
+Number of DE genes: `r sum(tab$adj.P.Val < 0.05)`
+
+IL10RB expression is not associated with viral load
+```{r test.il10RB.no_Cov}
+tab = topTable(res$fit, coef='SARS.CoV.2', number=Inf)
+
+tab = tab %>% getGeneSymbol 
 tab %>% filter(Symbol=="IL10RB") %>% kable(caption="Test IL10RB versus viral load") %>% kable_styling(full_width=FALSE)
+```
+
+```{r IL10RB_SARS.no_cov}
+ensGene = tab %>% filter(Symbol=="IL10RB") %>% rownames
+
+df = merge(infoSub, data.frame(ID = colnames(vobj), IL10RB.expression =  t(t(vobj$E[ensGene,]))), by="ID")
+
+ggplot(df, aes(IL10RB.expression, SARS.CoV.2)) + geom_point() + geom_smooth(method='lm') + theme_classic() + theme(aspect.ratio=1)
+
+with(df, cor.test(IL10RB.expression, SARS.CoV.2))
 ```
 
 
