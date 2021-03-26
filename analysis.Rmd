@@ -100,7 +100,7 @@ storeData = function( name, description){
   synStore(nEXP_OBJ)#, used = ALL_USED_IDs, executed = thisFile)
 }
 
-source("/Users/gabrielhoffman/workspace/repos/CMC/covarr-de/common_functions/common_functions.R")
+source("common_functions.R")
 
 }) 
 knitr::opts_chunk$set(
@@ -462,21 +462,21 @@ gs.combine = GeneSetCollection(c(unlist(gs.sets)))
 #   x
 # })
 
-gs.GO = get_GeneOntology()
-
 # get GO genesets that contail IL10, IL10RA, IL10RB
-gs.GO.symbol = get_GeneOntology(to='SYMBOL')
+gs.GO.symbol = get_GeneOntology( to='SYMBOL')
+gs.GO = get_GeneOntology()
 
 gs.keep = sapply(gs.GO.symbol, function(x){
   any(geneIds(x) %in% c('IL10', 'IL10RA', 'IL10RB'))
 })
 go.names.keep = names(gs.GO.symbol)[gs.keep]
 
-# Combine COVID genesets and GO genesets that contail IL10, IL10RA, IL10RB
+# # Combine COVID genesets and GO genesets that contail IL10, IL10RA, IL10RB
 gsc.test = GeneSetCollection(c(gs.GO[go.names.keep], gs.combine))
+
+# gs.GO = get_GeneOntology(onto="MF")
+# gsc.test = GeneSetCollection(c(gs.GO, gs.combine))
 ```
-
-
 
 
 # Run analysis
@@ -515,7 +515,7 @@ run_analysis = function(vobj, infoSub, baseline, coefs, form, gsc){
   fit = dream( vobj, form, infoSub)
   fit = eBayes(fit)
 
-  res = run_zenith( fit, coefs, recodeToList(gsc), n_genes_min=20, n_genes_max=1000)
+  res = run_zenith( fit, coefs, recodeToList(gsc), n_genes_min=10, n_genes_max=1000)
     
   # get t-statistics
   df_tstat = lapply( coefs, function(coef){
@@ -536,9 +536,18 @@ gheatmap = function( df_melt, row, col, value, label='', sort.row=TRUE, sort.col
   df_melt[[row]] = factor(df_melt[[row]], unique(df_melt[[row]]))
   df_melt[[col]] = factor(df_melt[[col]],  unique(df_melt[[col]]))
 
-  df = matrix(with(df_melt, delta / se), nlevels(df_melt[[col]]), nlevels(df_melt[[row]]), byrow=TRUE)
+  df = matrix(NA, nlevels(df_melt[[col]]), nlevels(df_melt[[row]]), byrow=TRUE)
   colnames(df) = levels(df_melt[[row]])
   rownames(df) = levels(df_melt[[col]])
+
+  tstat = with(df_melt, delta / se)
+
+  for(i in 1:nrow(df_melt) ){
+    df[ df_melt[[col]][i], df_melt[[row]][i]] = tstat[i]
+  } 
+
+  df_melt$Text = NA
+  df_melt$Text[df_melt$FDR < 0.05] = '*'
 
   # C = cor(t(df), method="spearman")
   # plotCorrMatrix(C)
@@ -565,7 +574,8 @@ gheatmap = function( df_melt, row, col, value, label='', sort.row=TRUE, sort.col
     zlim = c(-zlim, zlim)
   }
   
-  fig =  ggplot(df_melt, aes_string(col, row, fill='value')) + geom_tile() + scale_fill_gradient2(name=label,low="blue", mid="white", high="red", limits=zlim) + theme_classic(8) + theme(plot.title = element_text(hjust = 0.5), axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))
+  # substring(df_melt[[row]], 0, 80)
+  fig =  ggplot(df_melt, aes_string(col, row, fill='value')) + geom_tile() + scale_fill_gradient2(name=label,low="blue", mid="white", high="red", limits=zlim) + theme_classic(8) + theme(plot.title = element_text(hjust = 0.5), axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) + geom_text(aes(label=Text), hjust = 0.5, vjust=0.5)
 
   if( isSquare ){
     aspect.ratio = length(unique(df_melt[[row]])) / length(unique(df_melt[[col]]))
@@ -578,27 +588,45 @@ gheatmap = function( df_melt, row, col, value, label='', sort.row=TRUE, sort.col
 }
 ```
 
+
+
+
 ```{r DE.Test, message=FALSE, fig.height=20}
-keep.samples = with(info, Method == "CRISPRa")# & COVID=='CoV-')
-keep.samples[] = TRUE
+# CRISPRa
+##########
+keep.samples = with(info, Method == "CRISPRa")
 keep <- filterByExpr(geneCounts[,keep.samples])
 dge = DGEList( geneCounts[keep,keep.samples])
 dge = calcNormFactors(dge)
 
-infoSub = droplevels(info[keep.samples,])
+infoSub.CRISPRa = droplevels(info[keep.samples,])
 
 form = ~ Gene + COVID + MDS1 + MDS2 + RIN 
-design = model.matrix( form, infoSub)
-vobj = voom(dge, design, plot=FALSE)
+design = model.matrix( form, infoSub.CRISPRa)
+vobj.CRIPSRa = voom(dge, design, plot=FALSE)
 
 baseline = 'Scramble CRISPRa'
-coefs.CRISPRa = paste0('Gene',c('IL10RB-1', 'IL10RB-2', 'IL10RB-3', 'IL10RB-4'))
+coefs.CRISPRa = c(paste0('Gene',c('IL10RB-1', 'IL10RB-2', 'IL10RB-3', 'IL10RB-4')), 'COVIDCoV+')
 # coefs.CRISPRa = c(coefs.CRISPRa, 'GeneScramble shRNA')
-res.CRISPRa = run_analysis( vobj, infoSub, baseline, coefs.CRISPRa, form, gsc.test)
+res.CRISPRa = run_analysis( vobj.CRIPSRa, infoSub.CRISPRa, baseline, coefs.CRISPRa, form, gsc.test)
+
+# shRNA
+##########
+keep.samples = with(info, Method == "shRNA")
+keep <- filterByExpr(geneCounts[,keep.samples])
+dge = DGEList( geneCounts[keep,keep.samples])
+dge = calcNormFactors(dge)
+
+infoSub.shRNA = droplevels(info[keep.samples,])
+
+form = ~ Gene + COVID + MDS1 + MDS2 + RIN 
+design = model.matrix( form, infoSub.shRNA)
+vobj.shRNA = voom(dge, design, plot=FALSE)
+
 
 baseline = 'Scramble shRNA'
 coefs.shRNA = c(paste0('Gene',c('IFNAR2', 'IL10RB')), 'COVIDCoV+')
-res.shRNA = run_analysis( vobj, infoSub, baseline, coefs.shRNA, form, gsc.test)
+res.shRNA = run_analysis( vobj.shRNA, infoSub.shRNA, baseline, coefs.shRNA, form, gsc.test)
 
 # upload results
 df_tstat = merge(res.CRISPRa$df_tstat, res.shRNA$df_tstat, by="Geneid") %>% getGeneSymbol('Geneid')
@@ -654,7 +682,7 @@ df_de = lapply(coefs.shRNA, function(coef){
 df_de = do.call(rbind, df_de)
 
 df_de[with(df_de, coef==Symbol),] %>% dplyr::select(c('coef', 'logFC', 't', 'P.Value')) %>% kable(caption="Effect of shRNA on the target gene", row.names=FALSE) %>% kable_styling(full_width=FALSE)
-df_de[with(df_de, coef=='COVIDCoV+'),] %>% dplyr::select(c('coef', 'logFC', 't', 'P.Value')) %>% kable(caption="Effect of SARS-CoV-2 infection", row.names=FALSE) %>% kable_styling(full_width=FALSE)
+df_de[with(df_de, coef=='COVIDCoV+'),] %>% dplyr::select(c('coef', 'Symbol', 'logFC', 't', 'P.Value')) %>% kable(caption="Effect of SARS-CoV-2 infection", row.names=FALSE) %>% kable_styling(full_width=FALSE)
 ```
 
 
@@ -663,11 +691,10 @@ df_de[with(df_de, coef=='COVIDCoV+'),] %>% dplyr::select(c('coef', 'logFC', 't',
 res = res.shRNA
 coefs = coefs.shRNA
 
-
 lapply(coefs, function(x){
 
   tab = topTable(res$fit, coef=x, number=Inf)
-  data.frame(gRNA = gsub("Gene", '', x), Count = sum(tab$adj.P.Val < 0.05))
+  data.frame(shRNA = gsub("Gene", '', x), Count = sum(tab$adj.P.Val < 0.05))
 }) %>% do.call(rbind, .) %>% kable(caption="# DE") %>% kable_styling(full_width=FALSE)
 
 figList = lapply(coefs, function(x){
@@ -680,13 +707,69 @@ plot_grid(plotlist=figList, ncol=2)
 
 ```
 
+```{r jaccard_filter}
+
+# Given C, a matrix of pairwise Jaccard similarities, 
+#  remove one entry from a pair if simularity > cutoff
+#  Continuous until all remaining similarity values are < cutoff
+#  The entry of the selected pair is random
+jaccard_filter = function(C, cutoff = .5){
+
+  # set to zero, so diagonal is not the max value
+  diag(C) = 0
+
+  while(1){
+    i = which.max(apply(C, 1, max))
+    j = which.max(C[,i])
+
+    if( C[i,j] > cutoff){
+      C = C[-i,-i]
+    }else{
+      break
+    }
+  }
+  colnames(C)
+}
+```
 
 
+```{r show.zenith.CRISPRa, fig.width=8, fig.height=7}
+library(metafor)
 
-```{r show.zenith.CRISPRa, fig.width=8, fig.height=10}
+# merge CRIPSRa and shRNA 
+res = data.table(rbind(res.CRISPRa$enrich, res.shRNA$enrich))
 
-res = rbind(res.CRISPRa$enrich, res.shRNA$enrich)
-gs.any = unique(res[res$FDR < .01,]$Set)
+# do meta analysis for SARS-CoV-2 exposure
+res_cov = res[Coef == 'COVIDCoV+',]
+tab = res_cov[,table(Set)]
+
+res_meta = lapply( names(tab[tab==2]), function(key){
+  df = res_cov[Set==key,]
+
+  tmp = suppressWarnings(rma(yi=delta, sei=se, data = df, method="FE"))
+
+  data.frame( NGenes = max(df$NGenes), 
+              Correlation = mean(df$Correlation),
+              delta = tmp$beta,
+              se = tmp$se,
+              p.less = NA,
+              p.greater = NA,
+              PValue = tmp$pval,
+              Direction = ifelse(sign(tmp$beta)==1, "Up", "Down"),
+              FDR = NA,
+              Set = key,
+              Coef = 'COVIDCoV+')
+})
+res_meta = do.call(rbind, res_meta)
+res_meta$FDR = p.adjust(res_meta$PValue, "fdr")
+
+# remove original COVID results
+res = res[Coef != 'COVIDCoV+',]
+
+# now add meta-analysis
+res = rbind(res, res_meta)
+
+gs.any = unique(res[res$FDR < 0.05,]$Set)
 # gs.any = unique(res[res$FDR < .1,]$Set)
 
 resCombine = res[res$Set %in% gs.any,]
@@ -700,52 +783,21 @@ resCombine$isGO[grep("GO", resCombine$Set)] = TRUE
 df = data.table(resCombine[resCombine$isGO,])
 df = df[,unique(data.table(Set, NGenes))]
 
-# get GO
-gs = get_GeneOntology()
-
 # get similarity of gene sets based on jaccard index
-M = pinnacle::getJaccardMatrix( gs[df$Set] )
-res = plotCorrMatrix(M)
+M = pinnacle::getJaccardMatrix( gs.GO[unique(df$Set)] )
 
-# sort genesets by clustering
-df$Set = factor(df$Set, colnames(M)[res$colInd])
-df = df[match(levels(Set), Set),]
-
-# Get max Jaccard for each geneset
-C = M
-diag(C) = NA
-df_max = data.frame(cormax = apply(C, 1, max, na.rm=TRUE))
-
-
-df_max = apply(C, 1, function(x){
-  i = which.max(x)
-  data.frame(ID = names(i), maxCor = x[i])
-  })
-df_max = do.call(rbind, df_max)
-
-df2 = merge(data.frame(df), df_max, by.x="Set", by.y="row.names")
-
-df2 %>% kable(caption="GO geneset info") %>% kable_styling(full_width=FALSE) 
+gs.keep = jaccard_filter( M, .2)
 ```
 
 
-```{r geneset.plots}
-exclude = c("GO0034614: cellular response to reactive oxygen species",
-"GO0001525: angiogenesis",
-"GO0048514: blood vessel morphogenesis",
-"GO0001775: cell activation",
-"GO0001944: vasculature development",
-"GO0002263: cell activation involved in immune response",
-"GO0071345: cellular response to cytokine stimulus",
-"GO0032943: mononuclear cell proliferation",
-"GO0034097: response to cytokine",
-"GO0001775: cell activation",
-"GO0045765: regulation of angiogenesis",
-"GO0045766: positive regulation of angiogenesis",
-"GO0045321: leukocyte activation",
-"GO0046651: lymphocyte proliferation",
-"GO0070301: cellular response to hydrogen peroxide")
 
+
+
+### CRISPR, all, GO
+Show genesets that have FDR < 5% for any coefficient.  Stars indicate the coefficient where FDR < 5%.  Gene sets are filtered for redundancy using Jaccard index with a cutoff of 0.2.
+
+```{r geneset.plots, fig.width=7, fig.height=16}
+  
 newLvls = c(
   'IL10RB-1' = "CRISPRa IL10RB-1",
   'IL10RB-2' = "CRISPRa IL10RB-2",
@@ -754,63 +806,79 @@ newLvls = c(
   'COVIDCoV+'= 'SARS-CoV-2 infection',
   'IL10RB'   = "shRNA IL10RB",
   'IFNAR2'   = "shRNA IFNAR2")
-
+  
 # set zlim
 zlim = max(abs(resCombine$value))
 zlim = c(-zlim, zlim)
-
+   
 figSigGO = resCombine %>% 
   mutate(Coef = plyr::revalue(Coef, newLvls)) %>% 
   mutate(Coef = factor(Coef, newLvls)) %>% 
-  dplyr::filter(isGO) %>% 
-  dplyr::filter(!Set %in% exclude) %>% 
-  gheatmap('Set', 'Coef', label="t-statistic", sort.col=FALSE, zlim=zlim)
-figSigGO
+  dplyr::filter(isGO) %>%    
+  dplyr::filter(Set %in% gs.keep) %>%   
+  gheatmap('Set', 'Coef', label="t-statistic", sort.col=FALSE, zlim=zlim)  
+figSigGO         
 ```
 
 
-```{r geneset.plots2}
+### CRISPR, all, beta corona virus gene sets
+```{r geneset.plots2, fig.width=7, fig.height=10}
 figSigOther = resCombine %>% 
   mutate(Coef = plyr::revalue(Coef, newLvls)) %>% 
-  mutate(Coef = factor(Coef, newLvls)) %>% 
-  dplyr::filter(!isGO) %>% 
-  gheatmap('Set', 'Coef', label="t-statistic", sort.col=FALSE, zlim=zlim)
-figSigOther
+  mutate(Coef = factor(Coef, newLvls)) %>%  
+  dplyr::filter(!isGO) %>%           
+  gheatmap('Set', 'Coef', label="t-statistic", sort.col=FALSE, zlim=zlim)  
+figSigOther        
 ```
 
-```{r cluster.signatures}
+```{r cluster.signatures, eval=FALSE}
 # cluster these responses.
 df_tstat = merge(res.CRISPRa$df_tstat, res.shRNA$df_tstat, by="Geneid")
 
 C = cor(df_tstat[,-1])
-
+  
 plotCorrMatrix(C)
 ```
 
 
 
 # DE in CoV- samples
-
 ```{r DE.Test.covNeg, message=FALSE, fig.height=20}
-keep.samples = with(info, COVID=='CoV-')
+# CRISPRa
+###########
+keep.samples = with(info, COVID=='CoV-' & Method == "CRISPRa")
 keep <- filterByExpr(geneCounts[,keep.samples])
 dge = DGEList( geneCounts[keep,keep.samples])
 dge = calcNormFactors(dge)
 
-infoSub = droplevels(info[keep.samples,])
+infoSub.CRISPRa.covneg = droplevels(info[keep.samples,])
 
 form = ~ Gene + MDS1 + MDS2 + RIN 
-design = model.matrix( form, infoSub)
-vobj = voom(dge, design, plot=FALSE)
+design = model.matrix( form, infoSub.CRISPRa.covneg)
+vobj.CRISPRa.covneg  = voom(dge, design, plot=FALSE)
 
 baseline = 'Scramble CRISPRa'
 coefs.CRISPRa = paste0('Gene',c('IL10RB-1', 'IL10RB-2', 'IL10RB-3', 'IL10RB-4'))
 # coefs.CRISPRa = c(coefs.CRISPRa, 'GeneScramble shRNA')
-res.CRISPRa = run_analysis( vobj, infoSub, baseline, coefs.CRISPRa, form, gsc.test)
+res.CRISPRa = run_analysis( vobj.CRISPRa.covneg, infoSub.CRISPRa.covneg, baseline, coefs.CRISPRa, form, gsc.test)
+
+# shRNA
+###########
+keep.samples = with(info, COVID=='CoV-' & Method == "shRNA")
+keep <- filterByExpr(geneCounts[,keep.samples])
+dge = DGEList( geneCounts[keep,keep.samples])
+dge = calcNormFactors(dge)
+
+infoSub.shRNA.covneg = droplevels(info[keep.samples,])
+
+form = ~ Gene + MDS1 + MDS2 + RIN 
+design = model.matrix( form, infoSub.shRNA.covneg)
+vobj.shRNA.covneg  = voom(dge, design, plot=FALSE)
+
 
 baseline = 'Scramble shRNA'
 coefs.shRNA = paste0('Gene',c('IFNAR2', 'IL10RB'))
-res.shRNA = run_analysis( vobj, infoSub, baseline, coefs.shRNA, form, gsc.test)
+res.shRNA = run_analysis( vobj.shRNA.covneg, infoSub.shRNA.covneg, baseline, coefs.shRNA, form, gsc.test)
 ```
 
 Differential expression performed with formula: `r paste(as.character(form), collapse=' ')`
@@ -884,33 +952,39 @@ plot_grid(plotlist=figList, ncol=2)
 ```
 
 
-
-```{r show.zenith.CRISPRa.covNeg.previous, fig.width=8, fig.height=10}
+<!---
+### Using gene sets found above
+--->
+```{r show.zenith.CRISPRa.covNeg.previous, fig.width=8, fig.height=35, eval=FALSE}
 res = rbind(res.CRISPRa$enrich, res.shRNA$enrich)
 
 res$Coef = paste0(gsub("Gene", '', res$Coef), " (CoV-)")
 res$value = with(res, delta/se)
 res2 = rbind(res, resCombine[,colnames(resCombine)!="isGO"])
 
-gs.any = unique(res2[res2$FDR < .01,]$Set)
-
-gheatmap( res2[res2$Set %in% gs.any,], 'Set', 'Coef', label="t-statistic")
-
+gs.any = unique(res2[res2$FDR < .05,]$Set)
+    
+gheatmap( res2[res2$Set %in% gs.any,], 'Set', 'Coef', label="t-statistic")  
+   
 storeData( 'res2', "Gene set analysis of differential expression (CoV-)" )
 ```
 
 
-```{r show.zenith.CRISPRa.covNeg, fig.width=8, fig.height=10}
-
+<!---
+## all at FDR < 10%
+--->
+```{r show.zenith.CRISPRa.covNeg, fig.width=8, fig.height=30,eval=FALSE}
 res = rbind(res.CRISPRa$enrich, res.shRNA$enrich)
-gs.any = unique(res[res$FDR < .05,]$Set)
-
-resCombine2 = res[res$Set %in% gs.any,]
-resCombine2$value = with(resCombine2, delta/se)
+gs.any = unique(res[res$FDR < .05,]$Set) 
+ 
+resCombine2 = res[res$Set %in% gs.any,] 
+resCombine2$value = with(resCombine2, delta/se)    
 gheatmap(resCombine2, 'Set', 'Coef', label="t-statistic")
 ```
 
-```{r zenith.covNEg}
+### Enrichments for CoV- samples
+Using only genesets from above
+```{r zenith.covNEg, fig.width=7, fig.height=15}
 
 resCombine.covneg = rbind(res.CRISPRa$enrich, res.shRNA$enrich)
 resCombine.covneg$Coef = factor(gsub("Gene", '', resCombine.covneg$Coef))
@@ -926,29 +1000,34 @@ res$Set = factor( res$Set, attr(figSigGO, "row.names"))
 # order based on previous figure
 res = res[order(as.numeric(res$Set)),]
 
+# get max value
+ids = c(attr(figSigGO, "row.names"), attr(figSigOther, "row.names"))
+zlim = max(abs(resCombine.covneg[resCombine.covneg$Set %in% ids,]$value))
+zlim = c(-zlim, zlim)
+
 res %>% 
   mutate(Coef = plyr::revalue(Coef, newLvls)) %>% 
-  mutate(Coef = factor(Coef, newLvls)) %>% 
-  dplyr::filter(isGO) %>% 
-  dplyr::filter(!Set %in% exclude) %>% 
+  mutate(Coef = factor(Coef, newLvls)) %>%   
+  dplyr::filter(isGO) %>%   
   gheatmap('Set', 'Coef', label="t-statistic", sort.col=FALSE, 
-    sort.row=FALSE, zlim=zlim)
+    sort.row=FALSE, zlim=zlim) 
 ```
 
 
-```{r zenith.covNEg.not.go}
+### shRNA, CoV-
+```{r zenith.covNEg.not.go, fig.width=8, fig.height=15}
 res = resCombine.covneg[resCombine.covneg$Set %in% attr(figSigOther, "row.names"),]
 res$Set = factor( res$Set, attr(figSigOther, "row.names"))
 
 # order based on previous figure
 res = res[order(as.numeric(res$Set)),]
 
-res %>% 
+res %>%   
   mutate(Coef = plyr::revalue(Coef, newLvls)) %>% 
   mutate(Coef = factor(Coef, newLvls)) %>% 
   dplyr::filter(!isGO) %>% 
   gheatmap('Set', 'Coef', label="t-statistic", sort.col=FALSE, 
-    sort.row=FALSE, zlim=zlim)
+    sort.row=FALSE, zlim=zlim)  
 ```
 
 ```{r exit1, cache=FALSE}
@@ -986,7 +1065,7 @@ res2 = run_analysis( baseline, coefs, ~ Gene*COVID + RIN)
 
 res = rbind(res1$enrich, res2$enrich)
 
-gs.any = unique(res[res$FDR < .1,]$Set)
+gs.any = unique(res[res$FDR < .05,]$Set)
 
 resCombine = res[res$Set %in% gs.any,]
 resCombine$value = with(resCombine, delta/se)
